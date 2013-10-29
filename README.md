@@ -3,8 +3,8 @@ facebook-sna
 
 Visualization of Facebook social network 
 
-## snapshot
+### snapshot
 
 ![facebook-sna](https://raw.github.com/redswallow/facebook-sna/master/images/sna.png "friends network")
 
-![facebook-sna](https://raw.github.com/redswallow/facebook-sna/master/images/clique.png "friends clique")
+![facebook-sna](https://raw.github.com/redswallow/facebook-sna/master/images/cliques.png "friends clique")

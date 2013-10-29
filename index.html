@@ -1,0 +1,193 @@
+<html><head>
+<title>Visualizing My Facebook Friends</title>
+<script type="text/javascript" src="http://d3js.org/d3.v2.min.js"></script>
+<script src="https://connect.facebook.net/en_US/all.js"></script>
+<style type="text/css">html,body{padding:0;margin:0;width:100%;height:100%;font-family:sans-serif;}#graph{position:relative;width:100%;height:100%;}#graph svg{display:block;position:absolute;top:0;left:0;}#who{position:absolute;top:10px;left:10px;}#controls{z-index:5;position:absolute;top:10px;right:10px;}#next_link{position:absolute;top:50%;width:100%;height:100px;text-align:center;margin-top:-50px;line-height:100px;background:#ccc;opacity:0.5;color:#444;text-decoration:none;}#next_link:hover{opacity:1.0;}</style>
+</head>
+<body>
+<div id="fb-root" class=" fb_reset">
+    <div style="position: absolute; top: -10000px; height: 0px; width: 0px;"></div>
+    <div style="position: absolute; top: -10000px; height: 0px; width: 0px;"><div></div></div>
+</div>
+<a href="#" onclick="next(); return false" id="next_link">visualize!</a>
+<div id="graph" style="display: none">
+<div id="who"></div>
+<div id="controls">
+<button type="button" id="pause">Start/Stop</button>
+</div>
+</div>
+<script type="text/javascript">
+            var lerp = function(a, b, t) {
+                return a + (b - a) * t;
+            };
+
+            FB.init({
+                appId:  '1374846899425612',
+                status: true,
+                cookie: true,
+                xfbml:  true
+            });
+
+            var next = function() {
+                d3.select('#next_link').style('display', 'none');
+                d3.select('#graph').style('display', null);
+
+                // Append an <svg> element to body for rendering (warning: SVG sucks and will
+                // probably hang Firefox, so use Chrome).
+                var svg = d3.select('#graph')
+                    .append('svg')
+                    .attr('width', parseInt(d3.select('#graph').style('width'), 10))
+                    .attr('height', parseInt(d3.select('#graph').style('height'), 10));
+
+                // Make a <g> tag for zoom purposes.
+                var g = svg.append('g');
+
+                svg.call(d3.behavior.zoom().on('zoom', function() {
+                    g.attr('transform',
+                        'translate(' + d3.event.translate + ')'
+                        + ' scale(' + d3.event.scale + ')');
+                }));
+
+                FB.login(function(response) {
+                    if (!response.authResponse) {
+                        alert("Something broke, or you haven't given me permission :(\n" +
+                              "\n" +
+                              "If you have, try reloading the page and trying again.");
+                    }
+
+                    var graph = {};
+
+                    FB.api('/me/friends', function(response) {
+                        // Construct a mapping of IDs to friends (we might want this later).
+                        var friends = response.data.reduce(function(acc, x) {
+                            acc[x.id] = x.name;
+                            return acc;
+                        }, {});
+
+                        // Extract the list of friend IDs.
+                        var fids = Object.keys(friends);
+
+                        // Add some nodes to the graph.
+                        graph.nodes = fids.map(function(id) {
+                            return {
+                                id: id,
+                                name: friends[id]
+                            };
+                        });
+
+                        FB.api('/fql?q=' +
+                            escape('SELECT uid1, uid2 FROM friend ' +
+                                   'WHERE ' +
+                                   '    uid1 IN (SELECT uid2 FROM friend WHERE uid1=me()) AND ' + 
+                                   '    uid2 IN (SELECT uid2 FROM friend WHERE uid1=me())'), function(response) {
+                            // Build a list of edges from the relations. D3.js needs us to store
+                            // them as indexes of nodes in the nodes list.
+                            graph.edges = response.data.map(function(rel) {
+                                return {
+                                    source: fids.indexOf(rel.uid1),
+                                    target: fids.indexOf(rel.uid2)
+                                };
+                            });
+
+                            // Construct a mapping of friendships.
+                            var friendships = graph.edges.reduce(function(acc, x) {
+                                if (!Object.prototype.hasOwnProperty.call(acc, x.source)) {
+                                    acc[x.source] = [];
+                                }
+                                if (!Object.prototype.hasOwnProperty.call(acc, x.target)) {
+                                    acc[x.target] = [];
+                                }
+                                if (!~acc[x.source].indexOf(x.target)) {
+                                    acc[x.source].push(x.target);
+                                }
+                                if (!~acc[x.target].indexOf(x.source)) {
+                                    acc[x.target].push(x.source);
+                                }
+
+                                return acc;
+                            }, {});
+
+                            // Compute the maximum links from a node.
+                            var maxFriends = Math.max.apply(Math, Object.keys(friendships).map(function(k) {
+                                return friendships[k].length;
+                            }));
+
+                            // Compute the size for a node.
+                            var sizeForNode = function(i) {
+                                return Math.round(lerp(2, 10, (friendships[i] || [-1]).length / maxFriends));
+                            };
+
+                            // Create a force layout to display nodes.
+                            var force = d3.layout.force()
+                                .charge(-120)
+                                .linkDistance(40)
+                                .size([parseInt(d3.select('#graph').style('width'), 10),
+                                       parseInt(d3.select('#graph').style('height'), 10)])
+                                .nodes(graph.nodes)
+                                .links(graph.edges);
+
+                            var paused = false;
+
+                            d3.select('#pause').on('click', function() {
+                                paused = !paused;
+                                if (paused) {
+                                    force.stop();
+                                } else {
+                                    force.resume();
+                                }
+                            })
+
+                            // Add the edges to the SVG.
+                            var edge = g.selectAll('line.edge')
+                                .data(graph.edges)
+                                .enter().append('line')
+                                .attr('class', 'edge')
+                                .style('stroke', 'rgba(200, 200, 200, 0.2)')
+                                .style('stroke-width', 0.5);
+
+                            // Add the nodes to the SVG.
+                            var node = g.selectAll('circle.node')
+                                .data(graph.nodes)
+                                .enter().append('circle')
+                                .attr('class', 'node')
+                                .attr('r', function(d, i) {
+                                    return sizeForNode(i);
+                                })
+                                .style('stroke', 'rgba(100, 100, 100, 0.2)')
+                                .style('fill', '#aaa')
+                                .style('cursor', 'pointer')
+                                .on('mouseover', function(d, i) {
+                                    d3.select(this)
+                                        .attr('r', sizeForNode(i) + 5)
+                                        .style('fill', '#a00');
+                                    var name = d3.select(this).data()[0].name;
+                                    d3.select('#who').text(name);
+                                })
+                                .on('mouseout', function(d, i) {
+                                    d3.select(this)
+                                        .attr('r', sizeForNode(i))
+                                        .style('fill', '#aaa');
+                                    d3.select('#who').text('');
+                                })
+                                .call(force.drag);
+
+                            // Hook up some events to D3.js.
+                            force.on('tick', function() {
+                                node.attr('cx', function(d) { return d.x; })
+                                    .attr('cy', function(d) { return d.y; });
+
+                                edge.attr('x1', function(d) { return d.source.x; })
+                                    .attr('y1', function(d) { return d.source.y; })
+                                    .attr('x2', function(d) { return d.target.x; })
+                                    .attr('y2', function(d) { return d.target.y; });
+                            });
+
+                            // Start the simulation.
+                            force.start();
+                        });
+                    });
+                });
+            };
+        </script>
+</body>
+</html>
